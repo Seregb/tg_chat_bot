@@ -6,21 +6,17 @@ from urllib import request
 from datetime import datetime
 import sys
 import time
-import threading
-from flask import Flask, render_template_string
-import schedule  # Новая библиотека для планировщика
+# Flask убран для GitHub Actions, так как он не нужен для разового запуска
+# import schedule # Можно оставить, но мы будем запускать функцию вручную
 
 # ===== Конфигурация =====
-TOKEN = os.environ.get('TOKEN')
+TOKEN = os.environ.get('TELEGRAM_TOKEN') # Имя переменной должно совпадать с Secret!
 API_KEY = os.environ.get('API_KEY')
 CHAT_ID = os.environ.get('CHAT_ID')
 
 if not TOKEN or not API_KEY:
-    print("❌ ERROR: TOKEN and API_KEY must be set in environment variables")
+    print("❌ ERROR: TELEGRAM_TOKEN and API_KEY must be set in environment variables")
     sys.exit(1)
-
-# ===== Flask приложение для Render =====
-app = Flask(__name__)
 
 # ===== RSS источники =====
 RSS_FEEDS = [
@@ -419,186 +415,7 @@ def send_daily_report():
     except Exception as e:
         print(f"❌ Daily report error: {e}")
 
-# ===== ПЛАНИРОВЩИК =====
-def scheduled_report():
-    """Функция для планировщика"""
-    print(f"⏰ Scheduled report triggered at {datetime.now()}")
-    send_daily_report()
-
-def start_scheduler():
-    """Запускает планировщик в отдельном потоке"""
-    # 07:15 UTC = 10:15 MSK (если сервер в UTC)
-    schedule.every().day.at("07:15").do(scheduled_report)
-    print("⏰ Scheduler started. Daily report set for 07:15 UTC (10:15 MSK)")
-    
-    while True:
-        schedule.run_pending()
-        time.sleep(30)  # Проверять каждые 30 секунд
-
-# ===== Обработка команд =====
-def get_updates(offset=None):
-    """Получение обновлений от Telegram"""
-    try:
-        url = f"https://api.telegram.org/bot{TOKEN}/getUpdates"
-        if offset:
-            url += f"?offset={offset}"
-        req = request.Request(url)
-        with request.urlopen(req, timeout=10) as resp:
-            return json.loads(resp.read().decode('utf-8'))
-    except Exception as e:
-        print(f"Get updates error: {e}")
-        return None
-
-def process_updates():
-    """Обработка команд в личных сообщениях"""
-    last_update_id = 0
-    
-    print("🤖 Bot started. Listening for commands...")
-    print("Commands in private chat: /start, /analyse, /test, /chatid")
-    
-    while True:
-        try:
-            updates = get_updates(last_update_id + 1)
-            if updates and 'result' in updates:
-                for update in updates['result']:
-                    last_update_id = update['update_id']
-                    
-                    if 'message' in update:
-                        msg = update['message']
-                        chat_id = msg['chat']['id']
-                        chat_type = msg['chat'].get('type', 'private')
-                        text = msg.get('text', '')
-                        
-                        if chat_type == 'private':
-                            print(f"📩 Private message: {text} from {chat_id}")
-                            
-                            if text == '/start':
-                                send_telegram_message(chat_id, 
-                                    "👋 <b>Бот для отслеживания кадровых изменений губернаторов РФ</b>\n\n"
-                                    "📡 Мониторинг 12 источников СМИ\n"
-                                    "🤖 AI-анализ новостей\n"
-                                    "📊 Ежедневные сводки\n\n"
-                                    "<b>Команды:</b>\n"
-                                    "/analyse — получить сводку новостей\n"
-                                    "/test — проверить работу бота\n"
-                                    "/chatid — показать ID чата"
-                                )
-                            elif text == '/test':
-                                send_telegram_message(chat_id, "✅ Бот работает!")
-                            elif text == '/analyse':
-                                send_telegram_message(chat_id, "⏳ <b>Анализирую новости из 12 источников...</b>")
-                                try:
-                                    result = run_analysis()
-                                    send_telegram_message(chat_id, result)
-                                except Exception as e:
-                                    error_msg = f"❌ Ошибка: {str(e)}"
-                                    send_telegram_message(chat_id, error_msg)
-                                    print(f"❌ Analysis error: {e}")
-                            elif text == '/chatid':
-                                send_telegram_message(chat_id, f"ID чата: <code>{chat_id}</code>")
-                            else:
-                                send_telegram_message(chat_id, 
-                                    "❌ Неизвестная команда.\n"
-                                    "Доступные команды:\n"
-                                    "/start — приветствие\n"
-                                    "/analyse — получить сводку\n"
-                                    "/test — проверить работу\n"
-                                    "/chatid — показать ID чата"
-                                )
-                        else:
-                            print(f"📢 Group message (ignored): {text[:50]} from {chat_id}")
-            
-            time.sleep(2)
-            
-        except Exception as e:
-            print(f"Process error: {e}")
-            time.sleep(5)
-
-def start_bot():
-    """Запускает бота в отдельном потоке"""
-    try:
-        process_updates()
-    except Exception as e:
-        print(f"Bot thread error: {e}")
-
-# ===== Flask веб-сервер для Render =====
-@app.route('/')
-def index():
-    """Страница-заглушка чтобы Render видел открытый порт"""
-    html = """
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Governor News Bot</title>
-        <style>
-            body {
-                font-family: Arial, sans-serif;
-                max-width: 800px;
-                margin: 50px auto;
-                padding: 20px;
-                background: #f0f0f0;
-            }
-            .container {
-                background: white;
-                padding: 30px;
-                border-radius: 10px;
-                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            }
-            h1 { color: #2c3e50; }
-            .status { color: #27ae60; font-weight: bold; }
-            .commands {
-                background: #f8f9fa;
-                padding: 15px;
-                border-radius: 5px;
-                font-family: monospace;
-            }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <h1>🤖 Governor News Bot</h1>
-            <p>Status: <span class="status">✅ Running</span></p>
-            <p>Бот активен и слушает команды в Telegram.</p>
-            <p>📅 Ежедневные отчёты отправляются в 10:15 MSK</p>
-            <h3>Доступные команды:</h3>
-            <div class="commands">
-                /start — приветствие<br>
-                /analyse — получить сводку новостей<br>
-                /test — проверить работу<br>
-                /chatid — показать ID чата
-            </div>
-            <p style="margin-top: 20px; color: #7f8c8d; font-size: 14px;">
-                Последний пинг: {{ now }}
-            </p>
-        </div>
-    </body>
-    </html>
-    """
-    return render_template_string(html, now=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-
-@app.route('/ping')
-def ping():
-    """Эндпоинт для keep-alive пинга"""
-    return "OK", 200
-
-# ===== ГЛАВНАЯ ФУНКЦИЯ =====
+# ===== ГЛАВНАЯ ФУНКЦИЯ ДЛЯ GITHUB ACTIONS =====
 if __name__ == "__main__":
-    # Проверяем аргументы командной строки
-    if len(sys.argv) > 1 and sys.argv[1] == "daily":
-        # Режим ежедневной рассылки (для ручного запуска)
-        send_daily_report()
-    else:
-        # Запускаем планировщик в отдельном потоке
-        scheduler_thread = threading.Thread(target=start_scheduler, daemon=True)
-        scheduler_thread.start()
-        print("✅ Scheduler thread started")
-        
-        # Запускаем бота в отдельном потоке
-        bot_thread = threading.Thread(target=start_bot, daemon=True)
-        bot_thread.start()
-        print("✅ Bot thread started")
-        
-        # Запускаем Flask веб-сервер
-        port = int(os.environ.get("PORT", 10000))
-        print(f"🌐 Starting web server on port {port}")
-        app.run(host='0.0.0.0', port=port)
+    # Для GitHub Actions мы просто запускаем функцию отправки отчета
+    send_daily_report()
