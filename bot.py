@@ -29,7 +29,8 @@ RSS_FEEDS = [
     'https://www.5-tv.ru/news/rss/',
     'http://news.mail.ru/rss/',
     'http://vz.ru/rss.xml',
-    'http://www.ria.ru/export/rss2/index.xml'
+    'http://www.ria.ru/export/rss2/index.xml',
+    "https://kremlin.ru/events/president/rss"
 ]
 
 # ===== Функции бота =====
